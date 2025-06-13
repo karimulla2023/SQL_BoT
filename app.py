@@ -17,29 +17,33 @@ def normalize_quotes(query: str) -> str:
     }
     for old, new in replacements.items():
         query = query.replace(old, new)
-    # Replace backticks (commonly misused for string literals) with single quotes.
     query = query.replace('`', "'")
     return query
 
 def remove_numeric_quotes(query: str) -> str:
     """
     Remove quotes around pure numeric literals (integers or decimals, optional leading minus).
-    E.g., '80000' -> 80000, '-3.14' -> -3.14.
     """
     pattern = re.compile(r'(["\'])(-?\d+(?:\.\d+)?)(\1)')
     return pattern.sub(lambda m: m.group(2), query)
 
-def correct_and_format_sql(raw_query: str) -> str:
+def correct_and_format_sql_single_line(raw_query: str) -> str:
     """
-    Normalize quotes, remove numeric quotes, then format with sqlparse.
+    Normalize quotes, remove numeric quotes, then format with sqlparse (uppercasing keywords),
+    and finally collapse all whitespace/newlines into single spaces to produce a single-line SQL.
     """
     normalized = normalize_quotes(raw_query)
     numeric_fixed = remove_numeric_quotes(normalized)
     try:
-        formatted = sqlparse.format(numeric_fixed, reindent=True, keyword_case='upper')
+        # Format without reindent (so sqlparse won't introduce newlines),
+        # but uppercase keywords for consistency.
+        formatted = sqlparse.format(numeric_fixed, keyword_case='upper', reindent=False)
     except Exception:
         formatted = numeric_fixed
-    return formatted
+    # Collapse all whitespace (including any newlines) into single spaces:
+    # e.g. if sqlparse still inserted newlines or tabs, they’ll be normalized.
+    single_line = re.sub(r'\s+', ' ', formatted).strip()
+    return single_line
 
 @app.route('/correct_sql', methods=['GET', 'POST'])
 def correct_sql():
@@ -47,7 +51,7 @@ def correct_sql():
     Accepts:
       - GET:  ?query=<SQL string>
       - POST: JSON body {"query": "<SQL string>"} or form data query=<SQL string>
-    Returns JSON: {"corrected_query": "<formatted SQL>"}
+    Returns JSON: {"corrected_query": "<single-line SQL>"}
     """
     # Retrieve raw_query
     raw_query = ''
@@ -63,10 +67,10 @@ def correct_sql():
     if not raw_query.strip():
         return jsonify({'error': 'No query provided'}), 400
 
-    corrected = correct_and_format_sql(raw_query)
-    return jsonify({'corrected_query': corrected})
+    # Get single-line corrected SQL
+    corrected_single_line = correct_and_format_sql_single_line(raw_query)
+    return jsonify({'corrected_query': corrected_single_line})
 
 if __name__ == '__main__':
-    # For local testing: pick port from PORT env var or default 5000
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=True)
